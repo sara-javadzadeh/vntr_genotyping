@@ -3,6 +3,7 @@ import numpy as np
 from scipy.stats import differential_entropy, entropy
 import random
 
+targeted_samples_ids_file = "../../../sample_ids.txt"
 
 def compute_entropy(samples, spanning_reads, min_sr, max_sr, is_continuous=True):
     selected_srs = [] #min_sr, max_sr]
@@ -15,10 +16,17 @@ def compute_entropy(samples, spanning_reads, min_sr, max_sr, is_continuous=True)
         value, counts = np.unique(selected_srs, return_counts=True)
         return entropy(counts, base=2)
 
+def read_samples(filename):
+    ids = []
+    with open(filename) as samples_ids_file:
+        for line in samples_ids_file.readlines():
+            ids.append(line.strip())
+    return ids
+
 def compute_entropy_for_vntr(words, max_sr, downsample=True, same_scale=True):
     spanning_reads = {}
     max_scale_thr = 50
-    targeted_samples = ["40096", "40525", "40567", "40577", "40634", "40801", "40566"]
+    targeted_samples = read_samples(targeted_samples_ids_file)
     for word in words:
         if word.startswith("HG") or word.strip() in targeted_samples:
             sample_name = word

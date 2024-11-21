@@ -1,6 +1,8 @@
 import os
 import pandas as pd
 
+targeted_samples_filename="../../../sample_ids.txt"
+
 def print_median(df, column):
     print("Median of {} is {:.2f}".format(
             column, df[column].median()))
@@ -65,6 +67,13 @@ def get_wgs_samples():
     return sample_names
 
 
+def read_targeted_samples(filename):
+    ids = []
+    with open(filename) as samples_ids_file:
+        for line in samples_ids_file.readlines():
+            ids.append(line.strip())
+    return ids
+
 # Get inconsistent VNTRs in at least one sample
 def get_inconsistent_vntrs(filename, sample, verbose):
     vids = []
@@ -94,7 +103,7 @@ def get_inconsistent_wgs_vids():
     return vids
 
 def get_inconsistent_targeted_vids():
-    samples = ["40096", "40525", "40566", "40567", "40577", "40634", "40801"]
+    samples = read_targeted_samples(targeted_samples_filename)
     sample_template = "/nucleus/projects/saraj/vntr/sources/COH_analysis/scripts/compare_short_long_vntrs/deprecated/v14_integrated_updates_no_str_sr_3/comparison_#/unfiltered/#_VNTRs_with_inconsistent_genotype_calls.txt"
     vids = []
     for sample in samples:
