@@ -1,5 +1,6 @@
 import os
 import glob
+import argparse
 
 import seaborn as sns
 from matplotlib import pyplot as plt
@@ -7,15 +8,17 @@ from collections import defaultdict
 import pandas as pd
 
 def plot(dataframe, plot_suffix, num_vntrs, num_samples):
+    if not os.path.exists("figures"):
+        os.mkdir("figures")
+
     sns.set(font_scale=2)
     font_size = 60
     fig, ax = plt.subplots(figsize=(num_samples, num_vntrs))
-    heatmap = sns.heatmap(dataframe, ax=ax, #annot=True,
+    heatmap = sns.heatmap(dataframe, ax=ax,
                           vmin=0, vmax=30)
     ticks = list(range(0, 31, 5))
     ticklabels = [str(tick) for tick in ticks]
     ticklabels[-1] = ">={}".format(ticklabels[-1])
-    print(len(ticks), len(ticklabels))
     colorbar_axis = heatmap.figure.axes[-1]
     colorbar_axis.set_yticks(ticks)
     colorbar_axis.set_yticklabels(ticklabels)
@@ -24,10 +27,15 @@ def plot(dataframe, plot_suffix, num_vntrs, num_samples):
     plt.ylabel("VNTR", fontsize=font_size)
 
     plt.savefig("figures/spanning_reads_heatmap_no_annot_" + plot_suffix + ".pdf", format="pdf", bbox_inches='tight')
-    #plt.savefig("figures/spanning_reads_heatmap_no_annot_" + plot_suffix + ".jpg", format="jpg", bbox_inches='tight')
 
-def get_sample_ids():
-    samples_dir = "/ribosome/projects/saraj/vntr/data/pangenome_project/pacbio_hifi_mapped_reads/HG*"
+def get_sample_ids(samples_filename):
+    samples_ids = []
+    with open(samples_filename, "r") as samples_file:
+        for line in samples_file.readlines():
+            samples_ids.append(line.strip())
+    return samples_ids
+
+def get_sample_ids_from_bam_dir(samples_dir):
     sample_ids = []
     for file_name in glob.glob(samples_dir):
         sample_ids.append(os.path.basename(file_name))
@@ -95,7 +103,6 @@ def get_vntr_name_map(target_set):
                 "915594": "CEL",
                 "123860": "INS",
                 "358459": "EIF4A3",
-                #DUX4 665101
                 "731268": "MUC22",
                 "331665": "GP1BA",
                 "290964": "ACAN",
@@ -115,13 +122,8 @@ def get_vntr_name_map(target_set):
                 "450626": "IL1RN",
                 "49244": "TMCO1",
                 "239917": "CUL4A",
-                #"239917": "CUL4A-1",
-                #"239918": "CUL4A-2",
                 "705182": "IL4",
                 "339765": "SLC6A4",
-                #"339765": "SLC6A4-1",
-                #"339766": "SLC6A4-2",
-                #"339767": "SLC6A4-3",
                 "983810": "MUC6",
                 "165038": "CACNA1C",
                 "75781": "NLRP3",
@@ -141,22 +143,11 @@ def get_vntr_name_map(target_set):
                 "666245": "SLC6A3-2",
                 "915594": "CEL",
                 "492236": "NOP56",
-                #"492236": "NOP56-1",
-                #"492237": "NOP56-2",
                 "123860": "INS",
                 "527656": "CSTB",
-                "358459": "EIF4A3", # There are more than 2 alternatives here.
-                #"358459": "EIF4A3-1",
-                #"358460": "EIF4A3-2",
+                "358459": "EIF4A3",
                 "90147": "FZD8",
-                #"90143": "FZD8-1", # Not processed in the heatmap
-                #"90147": "FZD8-2",
-                #"90148": "FZD8-3",
-                #"90149": "FZD8-4",
-                #"90150": "FZD8-5",
-                #"90151": "FZD8-6",
                 "936686": "MAOA-1",
-                #"936687": "MAOA-2", # Not processed in the heatmap
                 "936688": "MAOA-3",
                 "983819": "TAF1",
             }
@@ -176,14 +167,12 @@ def get_total_spanning_reads(filename):
                 num_spanning_reads += 1
     return num_spanning_reads
 
-def analyze_disease_vntrs(vntr_target_set):
+def analyze_disease_vntrs(vntr_target_set, samples_filename, target_vntr_filename, logs_dir):
     vntr_target_set_name_map = {"short": "short_vntrs",
                                 "long": "long_vntrs",
                                 "all_vntrs": "all_vntrs_v5_unique"}
-    target_vntr_filename = "/nucleus/projects/saraj/vntr/sources/pangenome_project/target_vntrs/disease_associated_" +\
-                            vntr_target_set_name_map[vntr_target_set] + ".txt"
     vntr_ids = get_vntr_ids(file_name=target_vntr_filename)
-    sample_ids = get_sample_ids()
+    sample_ids = get_sample_ids(samples_filename)
     print("Num samples: ", len(sample_ids))
     vntr_name_map = get_vntr_name_map(vntr_target_set)
 
@@ -191,9 +180,8 @@ def analyze_disease_vntrs(vntr_target_set):
     spanning_reads_df = pd.DataFrame(columns=vntr_name_map.values(), index=sample_ids)
     for vntr_id in vntr_ids:
         for sample_id in sample_ids:
-            log_file_name = "/nucleus/projects/saraj/vntr/sources/pangenome_project" +\
-                "/logs/logs_pairwise_align_disease_all_vntrs_v5/" + \
-                "log_{}_aligned_GRCh38_winnowmap.sorted.bam.log_vid_{}.txt".format(sample_id, vntr_id)
+            log_file_name = os.path.join(logs_dir,
+                "log_{}_aligned_GRCh38_winnowmap.sorted.bam.log_vid_{}.txt".format(sample_id, vntr_id))
             spanning_reads = 0
             if os.path.exists(log_file_name):
                 spanning_reads = get_total_spanning_reads(log_file_name)
@@ -203,25 +191,21 @@ def analyze_disease_vntrs(vntr_target_set):
             vntr_gene_name = vntr_name_map[vntr_id]
             spanning_reads_df.at[sample_id, vntr_gene_name] = spanning_reads
 
-    print("vntrs removed from vntr_name_map {}".format(len(removed_from_vntr_name_map)))
+    #print("vntrs removed from vntr_name_map {}".format(len(removed_from_vntr_name_map)))
     # Sort and prepare the dataframe for plotting.
     spanning_reads_df = spanning_reads_df.fillna(0)
     spanning_reads_df["median over VNTRs"] = spanning_reads_df.median(axis=1)
     spanning_reads_df.loc["median over\nsamples"] = spanning_reads_df.median(axis=0)
-    #spanning_reads_df.loc["std over\nsamples"] = spanning_reads_df.std(axis=0)
-    #print("median std over samples: ", spanning_reads_df.loc["std over\nsamples"].median())
     spanning_reads_df.at["median over\nsamples", "median over VNTRs"] = 0
-    #spanning_reads_df.at["std over\nsamples", "median over VNTRs"] = 0
     spanning_reads_df = spanning_reads_df.sort_values(by="median over VNTRs", ascending=False)
     spanning_reads_df = spanning_reads_df.sort_values(by="median over\nsamples", ascending=False, axis=1)
-    print(spanning_reads_df.loc["median over\nsamples"])
+    #print(spanning_reads_df.loc["median over\nsamples"])
     all_median_over_samples = list(spanning_reads_df.loc["median over\nsamples"].astype(int))
 
     print("num vntrs with >=15 SR {} and len all_median_over_samples {}".format(len(
         [sr for sr in all_median_over_samples if sr >=15]),
         len(all_median_over_samples)))
     # Print basic dataframe information.
-    #print(spanning_reads_df.head())
     print("Dataframe shape: ", spanning_reads_df.shape)
 
     # Store the dataframe and plot.
@@ -231,10 +215,30 @@ def analyze_disease_vntrs(vntr_target_set):
          num_samples=spanning_reads_df.shape[0],
          num_vntrs=spanning_reads_df.shape[1])
 
+def parse_arguments():
+    parser = argparse.ArgumentParser(
+                prog="plot_heatmap_p_vntrs",
+                description="Plot the heatmap only for P-VNTRs.")
+
+    parser.add_argument("--samples-filename", help="Path to the file with one sample id at each line",
+                        type=str,
+                        default="data/wgs_samples_ids.txt")
+    parser.add_argument("--p-vntrs-ids", help="Path to the text file including all p-vntr ids.",
+                        type=str,
+                        default="../../target_vntrs/disease_associated_all_vntrs_v5_unique.txt")
+    parser.add_argument("--logs-dir", help="Path to the directory including log files.",
+                        type=str,
+                        default="data/logs_p_vntrs")
+
+    args = parser.parse_args()
+    return args
+
 def main():
-    #analyze_disease_vntrs("long")
-    #analyze_disease_vntrs("short")
-    analyze_disease_vntrs("all_vntrs")
+    args = parse_arguments()
+    analyze_disease_vntrs("all_vntrs",
+                samples_filename=args.samples_filename,
+                target_vntr_filename=args.p_vntrs_ids,
+                logs_dir=args.logs_dir)
 
 if __name__ == "__main__":
     main()

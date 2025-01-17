@@ -1,12 +1,12 @@
 # Need to run conda activate bioinfo
 import numpy as np
+import argparse
 from scipy.stats import differential_entropy, entropy
 import random
 
-targeted_samples_ids_file = "../../../sample_ids.txt"
 
 def compute_entropy(samples, spanning_reads, min_sr, max_sr, is_continuous=True):
-    selected_srs = [] #min_sr, max_sr]
+    selected_srs = []
     for sample in samples:
         selected_srs.append(spanning_reads[sample])
     if is_continuous:
@@ -23,12 +23,16 @@ def read_samples(filename):
             ids.append(line.strip())
     return ids
 
-def compute_entropy_for_vntr(words, max_sr, downsample=True, same_scale=True):
+def compute_entropy_for_vntr(words, max_sr, targeted_samples_ids_file,
+                             is_wgs,
+                             downsample=True, same_scale=True):
     spanning_reads = {}
     max_scale_thr = 50
     targeted_samples = read_samples(targeted_samples_ids_file)
     for word in words:
-        if word.startswith("HG") or word.strip() in targeted_samples:
+        if is_wgs and word.startswith("HG"):
+            sample_name = word
+        elif not is_wgs and word.strip() in targeted_samples:
             sample_name = word
         else: # It's a spanning read number
             spanning_reads[sample_name] = float(word)
@@ -44,22 +48,20 @@ def compute_entropy_for_vntr(words, max_sr, downsample=True, same_scale=True):
         ds_entropy = []
         for idx in range(num_random_experiments):
             subset = random.sample(samples, downsample_size)
-            #print("subset: ", subset)
             ds_entropy.append(compute_entropy(subset, spanning_reads, max_sr=max_sr, min_sr=0))
-            #print("ds_entropy: ", ds_entropy)
         return entropy, np.median(ds_entropy)
     else:
         return entropy, entropy
 
-def compute_entropy_for_dataset(is_wgs, same_scale):
+def compute_entropy_for_dataset(is_wgs, same_scale, targeted_samples_ids_file):
     if is_wgs:
         # WGS
-        sr_file = open("logs/sr_for_entropy.txt", "r")
+        sr_file = open("data/sr_for_entropy_wgs.txt", "r")
         downsample = True
         max_sr = 50
     else:
         # Targeted
-        sr_file = open("../../../COH_analysis/scripts/compare_short_long_vntrs/coverage_analysis/logs/sr_output_for_entropy.txt", "r")
+        sr_file = open("data/sr_for_entropy_targeted.txt", "r")
         downsample = False
         max_sr = 250
 
@@ -67,8 +69,9 @@ def compute_entropy_for_dataset(is_wgs, same_scale):
     down_sample_entropies = []
     for line in sr_file.readlines():
         words = line.split()
-        #vid = int(float(words[0]))
-        entropy, down_sample_entropy = compute_entropy_for_vntr(words[1:], downsample, max_sr, same_scale=same_scale)
+        entropy, down_sample_entropy = compute_entropy_for_vntr(words[1:], downsample,
+                                            targeted_samples_ids_file, is_wgs,
+                                            max_sr, same_scale=same_scale)
         if entropy and down_sample_entropy:
             entropies.append(entropy)
             down_sample_entropies.append(down_sample_entropy)
@@ -77,10 +80,25 @@ def compute_entropy_for_dataset(is_wgs, same_scale):
     print("Median down_sample_entropy across different VNTRs: {}".format(np.median(down_sample_entropies)))
     sr_file.close()
 
-if __name__ == "__main__":
+
+def parse_arguments():
+    parser = argparse.ArgumentParser(
+                prog="compute_entropy",
+                description="Compute entropy of the spanning reads.")
+
+    parser.add_argument("--targeted-samples-id-file", help="Path to a txt file with sample ids in one line.",
+                        type=str,
+                        default="data/targeted_samples_ids.txt")
+    args = parser.parse_args()
+    return args
+
+def main():
+    args = parse_arguments()
     for same_scale in [False, True]:
         print("Same scale of max 50 SR: ", same_scale)
         print("For WGS")
-        compute_entropy_for_dataset(is_wgs=True, same_scale=same_scale)
-        print("For targeted")
-        compute_entropy_for_dataset(is_wgs=False, same_scale=same_scale)
+        compute_entropy_for_dataset(targeted_samples_ids_file=args.targeted_samples_id_file,
+                                    is_wgs=True, same_scale=same_scale)
+
+if __name__ == "__main__":
+    main()

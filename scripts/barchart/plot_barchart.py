@@ -1,12 +1,12 @@
 from matplotlib import pyplot as plt
 import seaborn as sns
 import pandas as pd
+import argparse
 from Bio.SeqUtils import GC
 from advntr.models import update_gene_name_and_annotation_in_database, load_unique_vntrs_data
 from advntr.vntr_annotation import intersect, include, get_genes_info, \
                         get_refseq_id_to_gene_name_map, get_gene_name_from_refseq_id
 from advntr.vntr_annotation import get_exons_info as get_region_info
-#from advntr.vntr_annotation import get_gene_name_and_annotation_of_vntr
 
 
 polymorphism_type_colname = "Associated variant category (major length variation is >=10 RC different in the RC allele range reported)"
@@ -42,8 +42,7 @@ def get_gc_content(ref_vntr, round_to_int=True, verbose=False):
     else:
         return whole_region_GC
 
-def discard_strs(vids, data):
-    filename = "../vntrs_to_discard/str_ids.txt"
+def discard_strs(vids, data, filename):
     str_ids = []
     with open(filename, "r") as str_file:
         str_ids = str_file.readlines()
@@ -71,7 +70,6 @@ def get_annotations(db_file):
     utr5_info, _ = get_region_info(UTR5)
     utr3_info, _ = get_region_info(UTR3)
     name_mapping = get_refseq_id_to_gene_name_map()
-    # translate_ranges = get_translate_ranges(exons_info)
     vntr_to_annotation_map = {}
     reference_vntrs = load_unique_vntrs_data(db_file)
     for ref_vntr in reference_vntrs:
@@ -83,7 +81,6 @@ def get_annotations(db_file):
             introns_info, utr3_info,
             utr5_info, name_mapping)
         vntr_to_annotation_map[ref_vntr.id] = new_annotation
-    #print_map(vntr_to_annotation_map)
     return vntr_to_annotation_map
 
 def get_gene_name_and_annotation_of_vntr(vntr_chromosome, vntr_start, vntr_end, genes, exons, introns, utr3, utr5, name_mapping=None, gene_reference='refseq'):
@@ -158,9 +155,6 @@ def get_gene_name_and_annotation_of_vntr(vntr_chromosome, vntr_start, vntr_end, 
                 break
             if start - PROMOTER_RANGE > vntr_end:
                 break
-    #if annotation == "None":
-    #    print("gene {} annotation {}  {}:{}-{}".format(
-    #           gene_name, annotation, vntr_chromosome, start, end))
     return gene_name, annotation
 
 def read_single_g_database(g_vntr_database_filename):
@@ -175,7 +169,6 @@ def read_single_g_database(g_vntr_database_filename):
     # Update the annotations based on the updated map
     db_filename = g_vntr_database_filename.replace(".txt", ".db")
     vntr_to_annotation_map = get_annotations(db_filename)
-    #vntr_to_annotation_map = {}
     num_vntrs_with_missing_anotation = 0
     for idx, row in dataframe.iterrows():
         vid = int(row['vid'])
@@ -202,8 +195,6 @@ def read_single_g_database(g_vntr_database_filename):
         print("Num vntrs for {}: {}".format(
                 annotation,
                 len(dataframe[dataframe["annotation"] == annotation])))
-    # Remove VNTRs with None annotation
-    #dataframe = dataframe[dataframe["annotation"] != "None"]
     # Add a column with all values the same which helps to create a single (stacked) column in barchart
     dataframe["group"] = " "
     # Rename the column annotation to location
@@ -211,9 +202,7 @@ def read_single_g_database(g_vntr_database_filename):
     #print(dataframe.columns)
     return dataframe
 
-def read_g_database():
-    long_vntr_database_filename = "/nucleus/projects/saraj/vntr/sources/COH_analysis/databases/pacbio_vntr_db_used_for_probe_design_exact_match/Pacbio_probed_long_vntrs.txt"
-    short_vntr_database_filename = "/nucleus/projects/saraj/vntr/sources/COH_analysis/databases/illumina_vntr_db_used_for_probe_design/illumina_probed_short_vntrs.txt"
+def read_g_database(long_vntr_database_filename, short_vntr_database_filename, strs_filename):
     short_vntrs_df = read_single_g_database(short_vntr_database_filename)
     print("len short vntrs df ", len(short_vntrs_df))
     long_vntrs_df = read_single_g_database(long_vntr_database_filename)
@@ -223,19 +212,13 @@ def read_g_database():
     print("len concat_df before reset index ", len(concat_df))
     concat_df = concat_df.reset_index(drop=True)
     print("len concat_df after reset index ", len(concat_df))
-    #with open("temp_vids.txt", "w") as vids_file:
-    #    for vid in list(concat_df["vid"]):
-    #        vids_file.write(str(vid) + '\n')
     vids = concat_df["vid"]
-    vids, concat_df = discard_strs(vids, concat_df)
+    vids, concat_df = discard_strs(vids, concat_df, strs_filename)
     print("len concat_df after dropping STRs ", len(concat_df))
-    #print(concat_df.head())
-    #print(concat_df.columns)
     return concat_df
 
 def read_p_dataframe(verbose=False, specify_coding=False):
-
-    filename = "phenotype_associated_vntrs.tsv"
+    filename = "../../target_vntrs/phenotype_associated_vntrs.tsv"
     dataframe = pd.read_csv(filename, sep="\t")
     # Replace any character coming after these characters which are meant to provide more information.
     dataframe = dataframe.replace("\(.*", "", regex=True)
@@ -269,13 +252,10 @@ def read_p_dataframe(verbose=False, specify_coding=False):
     high_rc_category = "high\n(>=10)\nRC\nvariation"
     df_no_high_rc = dataframe[~(dataframe[polymorphism_type_colname] == high_rc_category)]
     df_no_high_rc["Total Length"] = df_no_high_rc["Total Length"].astype(int)
-    print("len vntrs in the minor length and specific allele frequencies {} of those {} are >150bp".format(
-                len(df_no_high_rc),
-                len(df_no_high_rc[df_no_high_rc["Total Length"] > 150])))
-    #print(dataframe["GC content (%)"])
-    #print("len high gc vntrs ", len(dataframe[dataframe["GC content (%)"].astype(int) >= 60]))
+    #print("len vntrs in the minor length and specific allele frequencies {} of those {} are >150bp".format(
+    #            len(df_no_high_rc),
+    #            len(df_no_high_rc[df_no_high_rc["Total Length"] > 150])))
 
-    print(dataframe[dataframe["Gene, loci"] == "TAF1"])
     # Specify coding or non-coding exon in the same column as location
     if specify_coding:
         # Looks like all exon are coding. So I'm skipping this for now.
@@ -306,7 +286,6 @@ def individual_barchart(dataframe, ax, x, y, ylim,
 
     # Change the order of labels in x and hue
     categorical_dataframe = dataframe.copy()
-    #hue_order = ["multiple", "3'utr","5'utr", 'promoter', 'intron', 'exon'][::-1]
     hue_order = ["multiple", "utr", 'promoter', 'intron', 'exon']
     new_colors_order = sns.color_palette("colorblind", n_colors=len(hue_order))
     new_colors_order = new_colors_order[::-1]
@@ -333,7 +312,6 @@ def individual_barchart(dataframe, ax, x, y, ylim,
                 multiple="stack",
                 hue=y,
                 hue_order=hue_order,
-                #bins=[0.5, 0.7],
                 binwidth=2,
                 palette=new_colors_order,
                 alpha=0.9)
@@ -344,7 +322,6 @@ def individual_barchart(dataframe, ax, x, y, ylim,
     else:
         # Re-order handles and labels to see the desired order
         ax.legend(ax.legend_.legendHandles[::-1], hue_order[::-1], title="Region", fontsize=15)
-        #print(dataframe[(dataframe[x] == "major\nlength\nvariation") & (dataframe["Location"] == "exon")])
     # Set tick label size
     ax.tick_params(axis='x', labelsize=15)
     ax.tick_params(axis='y', labelsize=15)
@@ -363,13 +340,11 @@ def plot_p_barchart_only(dataframe, prefix):
     fig.suptitle("Phenotype or disease associated VNTRs", y=0.95)
     # Two axis for plots and one axis to have continous grid line
     gs = fig.add_gridspec(1, 3,  width_ratios=(4, 1, 4),
-                          #left=0.1, right=0.9, bottom=0.1, top=0.9,
                           wspace=0, hspace=0)
     ylim=18
 
     # Adjust grid
     sns.set_style("whitegrid")
-    #print(plt.rcParams.keys())
     # Create the axes
     ax = fig.add_subplot(gs[0, 0])
     ax_middle = fig.add_subplot(gs[0, 1], sharey=ax)
@@ -553,13 +528,36 @@ def plot_g_barchart_only(dataframe, prefix):
 
     plt.savefig("{}_category_chart.pdf".format(prefix), format="pdf", bbox_inches="tight")
 
-if __name__ == "__main__":
+def parse_arguments():
+    parser = argparse.ArgumentParser(
+                prog="plot_barchart",
+                description="Plot the barchart with counts of P-VNTRs within each category (e.g. genomic region).")
+
+    parser.add_argument("--g-vntrs-short-db-txt", help="Path to the db file for short g-vntrs.",
+                        type=str,
+                        required=True)
+    parser.add_argument("--g-vntrs-long-db-txt", help="Path to the db file for long g-vntrs.",
+                        type=str,
+                        required=True)
+    parser.add_argument("--ids-to-discard-file", help="Path to the text file including ids to be discarded (e.g. test strs).",
+                        type=str,
+                        default="../../target_vntrs/str_ids_to_discard.txt")
+    args = parser.parse_args()
+    return args
+
+def main():
+    args = parse_arguments()
     # Phenotype associated dataframe
     p_vntr_dataframe = read_p_dataframe()
     # Gene proximal database
-    g_vntr_dataframe = read_g_database()
+    g_vntr_dataframe = read_g_database(long_vntr_database_filename=args.g_vntrs_long_db_txt,
+                                       short_vntr_database_filename=args.g_vntrs_short_db_txt,
+                                        strs_filename=args.ids_to_discard_file)
     print("len of g_vntr_dataframe: ", len(g_vntr_dataframe))
     print("len unique vids in g_vntr_dataframe: ", len(g_vntr_dataframe["vid"].unique()))
     plot_barchart(g_vntr_dataframe=g_vntr_dataframe,
                     p_vntr_dataframe=p_vntr_dataframe,
                     prefix="p_and_g_vntr")
+
+if __name__ == "__main__":
+    main()

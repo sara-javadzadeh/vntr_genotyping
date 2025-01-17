@@ -1,0 +1,2 @@
+FamilyID SampleID MotherID FatherID
+HG002 HG002 HG003 HG004

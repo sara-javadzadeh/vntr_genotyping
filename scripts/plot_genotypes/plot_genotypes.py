@@ -1,5 +1,6 @@
 import os
 import numpy as np
+import argparse
 import seaborn as sns
 from matplotlib import pyplot as plt
 import pandas as pd
@@ -11,22 +12,19 @@ from Bio.SeqUtils import GC
 
 from advntr.models import load_unique_vntrs_data
 
-def discard_strs(vids):
-    filename = "../vntrs_to_discard/str_ids.txt"
+def discard_strs(vids, filename):
     str_ids = []
     with open(filename, "r") as str_file:
         str_ids = str_file.readlines()
     str_ids = [int(single_id) for single_id in str_ids]
-    print("vids len before discarding STRs ", len(vids))
     vids = [vid for vid in vids if vid not in str_ids]
-    print("vids len after discarding STRs ", len(vids))
     return vids
 
-def get_gc_content(ref_vntr, round_to_int=True, verbose=False):
+def get_gc_content(ref_vntr, flanking_threshold, round_to_int=True, verbose=False):
     """ return GC contents of vntr motif and flanking region"""
-    # flanking 100 bps
-    left_flanking_region = ref_vntr.left_flanking_region[-100:]
-    right_flanking_region = ref_vntr.right_flanking_region[:100]
+    # flanking regions
+    left_flanking_region = ref_vntr.left_flanking_region[-1*flanking_threshold:]
+    right_flanking_region = ref_vntr.right_flanking_region[:flanking_threshold]
     # VNTR sequence in reference model
     vntr_seq = "".join(ref_vntr.repeat_segments)
     whole_region = "".join([left_flanking_region,vntr_seq,right_flanking_region])
@@ -69,7 +67,6 @@ def process_genotype_file(filename, targetted_vntrs, is_expanded=False):
         else:
             # It's a line with vntr_id
             current_vntr_id = line.strip()
-    #print("None genotypes ", none_genotypes)
     return genotyped_vntrs, genotyped_vntr_ids
 
 def process_targetted_vntrs_file(targetted_vntrs_filename):
@@ -90,25 +87,16 @@ def get_vntr_name_map():
             "450626": "IL1RN",
             "49244": "TMCO1",
             "239917": "CUL4A",
-            #"239917": "CUL4A-1",
-            #"239918": "CUL4A-2",
             "705182": "IL4",
-            #"339765": "SLC6A4", ## changed vid
             "983816": "SLC6A4-1",
             "339765": "SLC6A4-2",
-            #"339766": "SLC6A4-2",
-            #"339767": "SLC6A4-3",
             "983810": "MUC6",
-            # Skipping CACNA1C due to low number of spanning reads
-            #"165038": "CACNA1C",
-            "983808": "AVPR1A", # Added
-            "983811": "FXN", # Added
+            "983808": "AVPR1A",
+            "983811": "FXN",
             "75781": "NLRP3",
-            "983812": "EIF3H-1", # Added
-            "983813": "EIF3H-2", # Added
-            #RNA922 (FRA16B) # Added
+            "983812": "EIF3H-1",
+            "983813": "EIF3H-2",
             "826396": "NOS3",
-            #"731247": "MUC21", # Don't have this anymore
             "331665": "GP1BA",
             "731278": "HCG22",
             "731268": "MUC22",
@@ -125,39 +113,25 @@ def get_vntr_name_map():
             "666244": "SLC6A3-3",
             "915594": "CEL",
             "492236": "NOP56",
-            #"492236": "NOP56-1",
-            #"492237": "NOP56-2",
-            "983814": "HIC1", # Added
+            "983814": "HIC1",
             "123860": "INS",
-            "983815": "VWA1", # Added
+            "983815": "VWA1",
             "527656": "CSTB",
-            "983817": "TCHH", # Added
+            "983817": "TCHH",
             "358459": "EIF4A3",
-            #"358459": "EIF4A3-1",
-            #"358460": "EIF4A3-2",
-            #"90147": "FZD8", # Removed
-            #"90143": "FZD8-1",
-            #"90147": "FZD8-2",
-            #"90148": "FZD8-3",
-            #"90149": "FZD8-4",
-            #"90150": "FZD8-5",
-            #"90151": "FZD8-6",
             "936686": "MAOA-1",
-            #"936687": "MAOA-2",
             "936688": "MAOA-2",
-            #"983819": "TAF1", # Updated VID
             "944729": "TAF1",
-            "983820": "FRA16B", # Added
-            "983821": "PCSK6", # Added
-            "746692": "TENT5A", # Added
-            "983808": "AVPR1A", # Added
+            "983820": "FRA16B",
+            "983821": "PCSK6",
+            "746692": "TENT5A",
+            "983808": "AVPR1A",
         }
     return vntr_name_map
 
 def apply_filtered_genotypes():
     filter_log_filename = "../filter/output_disease_all.txt"
     # Example in the filter output file:
-    # sample HG00438 id 45940: 14/22 -> 22/22
     filtered_gt_map = {}
     with open(filter_log_filename, "r") as filter_file:
         for line in filter_file.readlines():
@@ -169,26 +143,25 @@ def apply_filtered_genotypes():
             filtered_gt_map[(sample, vid)] = genotype
     return filtered_gt_map
 
-def get_samples():
-    samples_parent_directory = "/ribosome/projects/saraj/vntr/data/pangenome_project/pacbio_hifi_mapped_reads/"
-    directories = os.listdir(samples_parent_directory)
-    samples = [directory for directory in directories if directory.startswith("HG")]
-    #print("samples: ", samples)
+def get_samples(filename):
+    samples = []
+    with open(filename) as samples_ids_file:
+        for line in samples_ids_file.readlines():
+            for sample_id in line.split(","):
+                samples.append(sample_id.strip())
     print("Working with {} samples".format(len(samples)))
     return samples
 
-def get_id_to_genic_vntr_map():
+def get_id_to_genic_vntr_map(long_vntr_db, short_vntr_db):
     id_to_vntr_map = {}
-    long_vntr_db="/nucleus/projects/saraj/vntr/sources/COH_analysis/databases/pacbio_vntr_db_used_for_probe_design_exact_match/Pacbio_probed_long_vntrs.db"
     vntrs = load_unique_vntrs_data(long_vntr_db)
     for vntr in vntrs:
         id_to_vntr_map[vntr.id] = vntr
-    print("len of map {} after adding long vntrs".format(len(id_to_vntr_map)))
-    short_vntr_db="/nucleus/projects/saraj/vntr/sources/COH_analysis/databases/illumina_vntr_db_used_for_probe_design/illumina_probed_short_vntrs.db"
+    #print("len of map {} after adding long vntrs".format(len(id_to_vntr_map)))
     vntrs = load_unique_vntrs_data(short_vntr_db)
     for vntr in vntrs:
         id_to_vntr_map[vntr.id] = vntr
-    print("len of map {} after adding short vntrs".format(len(id_to_vntr_map)))
+    #print("len of map {} after adding short vntrs".format(len(id_to_vntr_map)))
 
     # Finding the number of VNTRs per chromosome
     chr_based_num_vntrs = defaultdict(float)
@@ -203,12 +176,10 @@ def get_id_to_genic_vntr_map():
 def get_variation_category_map():
     import re
     variation_category_map = {}
-    p_vntrs_file = "../figure_1_barchart/phenotype_associated_vntrs.tsv"
+    p_vntrs_file = "../../target_vntrs/phenotype_associated_vntrs.tsv"
     p_vntrs_df = pd.read_csv(p_vntrs_file, sep="\t")
     for idx, row in p_vntrs_df.iterrows():
         vntr_name = row["Gene, loci"]
-        if vntr_name == "TAF1":
-            print("Found TAF1 in the category")
         vntr_id = row["VNTR ID (TRF, hg38) - at /nucleus/projects/saraj/vntr/sources/COH_analysis/databases/combined_trf_hg38/hg38_VNTRs_by_TRF.db"]
         variation_type = row["Associated variant category (major length variation is >=10 RC different in the RC allele range reported)"]
         variation_type = str(variation_type).lower()
@@ -219,13 +190,18 @@ def get_variation_category_map():
         variation_category_map[str(vntr_id)] = variation_type
     return variation_category_map
 
-def get_genic_genotype_distributions(verbose=False):
-    id_to_vntr_map = get_id_to_genic_vntr_map()
+def get_genic_genotype_distributions(long_vntr_db,
+                                     short_vntr_db,
+                                     strs_filename,
+                                     flanking_threshold,
+                                     g_vntrs_log_dir,
+                                     verbose=False):
+    id_to_vntr_map = get_id_to_genic_vntr_map(long_vntr_db=long_vntr_db,
+                                              short_vntr_db=short_vntr_db)
     vntr_ids = id_to_vntr_map.keys()
-    vntr_ids = discard_strs(vntr_ids)
+    vntr_ids = discard_strs(vntr_ids, strs_filename)
     print("len vntr_ids: ", len(vntr_ids))
-    samples = get_samples()
-    # TODO: apply filter for genotypes
+    samples = get_samples(os.path.join(g_vntrs_log_dir, "samples_ids.txt"))
     genotypes_df = DataFrame(columns=samples, index=vntr_ids)
     haplotypes = [sample + "-1" for sample in samples] + \
                      [sample + "-2" for sample in samples]
@@ -236,10 +212,8 @@ def get_genic_genotype_distributions(verbose=False):
     alleles_df = DataFrame(columns=allele_columns, index=vntr_ids)
     skipped_vntrs = set()
     for sample in samples:
-        genotype_filenames = ["/nucleus/projects/saraj/vntr/sources/pangenome_project/logs" +\
-                              "/logs_genotype_10k_long/output_per_sample_{}.txt".format(sample)]
-                              #"/nucleus/projects/saraj/vntr/sources/pangenome_project/logs" +\
-                              #"/logs_genotype_10k_short/output_per_sample_{}.txt".format(sample)]
+        genotype_filenames = [g_vntrs_log_dir +\
+                              "output_per_sample_{}.txt".format(sample)]
         for genotype_filename in genotype_filenames:
             genotyped_vntrs, genotyped_vntr_ids = process_genotype_file(
                     filename=genotype_filename,
@@ -257,13 +231,11 @@ def get_genic_genotype_distributions(verbose=False):
                         id_to_vntr_map[vntr_id].chromosome,
                         id_to_vntr_map[vntr_id].start_point)
                 alleles_df.at[vntr_id, "motif_len"] = len(id_to_vntr_map[vntr_id].pattern)
-                alleles_df.at[vntr_id, "gc_content"] = get_gc_content(id_to_vntr_map[vntr_id])
+                alleles_df.at[vntr_id, "gc_content"] = get_gc_content(id_to_vntr_map[vntr_id], flanking_threshold)
 
 
-    print("Len skipped vntrs {}".format(
-        len(list(skipped_vntrs))))
-    #genotypes_df = genotypes_df.drop_duplicates()
-    #alleles_df = alleles_df.drop_duplicates()
+    #print("Len skipped vntrs {}".format(
+    #    len(list(skipped_vntrs))))
 
     # Sort VNTRs in the alleles_df based on median allele value
     print("Computing median_rc")
@@ -289,18 +261,14 @@ def get_genic_genotype_distributions(verbose=False):
     return genotypes_df, alleles_df, sorted_vntrs, haplotypes, samples
 
 
-def get_disease_genotype_distributions():
+def get_disease_genotype_distributions(flanking_threshold, vntr_db, p_vntrs_ids_file, p_vntrs_log_dir):
     vntr_name_map = get_vntr_name_map()
-    vntr_name_to_vntr = get_vntr_name_to_vntr(vntr_name_map.values())
+    vntr_name_to_vntr = get_vntr_name_to_vntr(vntr_name_map.values(), vntr_db)
     variation_category_map = get_variation_category_map()
-    samples = get_samples()
-    targetted_vntrs_filename = "/nucleus/projects/saraj/vntr/sources/pangenome_project/target_vntrs/disease_associated_all_vntrs_v5_unique.txt"
+    samples = get_samples(os.path.join(p_vntrs_log_dir, "samples_ids.txt"))
+    targetted_vntrs_filename = p_vntrs_ids_file
     filtered_gt_map = apply_filtered_genotypes()
     vntr_ids = process_targetted_vntrs_file(targetted_vntrs_filename)
-    if vntr_name_map.keys() != vntr_ids:
-        print("vntr_name_keys != targeted file vntr_ids")
-        print("vntr_name_keys - targeted file vntr_ids", list(set(vntr_name_map.keys()) - set(vntr_ids)))
-        print("vntr_ids in targeted file - vntr_name_keys", list(set(vntr_ids) - set(vntr_name_map.keys())))
     genotypes_df = DataFrame(columns=samples, index=vntr_name_map.values())
     haplotypes = [sample + "-1" for sample in samples] + \
                      [sample + "-2" for sample in samples]
@@ -310,7 +278,7 @@ def get_disease_genotype_distributions():
     alleles_df = DataFrame(columns=allele_columns, index=vntr_name_map.values())
     skipped_vntrs = set()
     for sample in samples:
-        genotype_filename = "/nucleus/projects/saraj/vntr/sources/pangenome_project/logs/logs_genotype_disease_all_vntrs_v5/output_per_sample_{}.txt".format(sample)
+        genotype_filename = "{}/output_per_sample_{}.txt".format(p_vntrs_log_dir, sample)
         genotyped_vntrs, genotyped_vntr_ids = process_genotype_file(
                 filename=genotype_filename,
                 targetted_vntrs=vntr_ids)
@@ -329,12 +297,11 @@ def get_disease_genotype_distributions():
                 alleles_df.at[vntr_name, sample + "-2"] = int(genotype.split("/")[1])
                 alleles_df.at[vntr_name, "vntr_gene_name"] = vntr_name
                 alleles_df.at[vntr_name, "motif_len"] = len(vntr_name_to_vntr[vntr_name].pattern)
-                alleles_df.at[vntr_name, "gc_content"] = get_gc_content(vntr_name_to_vntr[vntr_name])
-                # TODO: Replacing MUC21 temporarily until the alleles_df is updated
+                alleles_df.at[vntr_name, "gc_content"] = get_gc_content(
+                            vntr_name_to_vntr[vntr_name], flanking_threshold)
                 vntr_name_for_var = vntr_name.replace("-1", "").replace("-2", "").replace("-3", "")
                 alleles_df.at[vntr_name, "variation category"] = variation_category_map[vntr_id]
 
-    print("Skipped vntrs {}".format(list(skipped_vntrs)))
     genotypes_df = genotypes_df.drop_duplicates()
     alleles_df = alleles_df.drop_duplicates()
     # Sort VNTRs in the alleles_df based on median allele value
@@ -345,26 +312,12 @@ def get_disease_genotype_distributions():
     alleles_df = alleles_df.sort_values(by=["median_rc"])
 
     sorted_vntrs = alleles_df.index
-    #print(alleles_df.loc["INS"])
-    # Remove outliers in the alleles_df
-    if False:
-        alleles_transpose = alleles_df.transpose()
-        for vntr in sorted_vntrs:
-            # 2*28=56 alleles, removing 2 outliers here at most.
-            q_low = alleles_transpose[vntr].quantile(0.05)
-            q_hi  = alleles_transpose[vntr].quantile(0.95)
-            #print("For {} VNTR, q_hi {}".format(vntr, q_hi))
-            alleles_transpose[vntr] = alleles_transpose[(alleles_transpose[vntr] <= q_hi) & (alleles_transpose[vntr] >= q_low)][vntr]
-        alleles_df = alleles_transpose.transpose()
-    #print(alleles_df.loc["INS"])
-    #print(genotypes_df)
     return genotypes_df, alleles_df, sorted_vntrs, haplotypes
 
 
-def get_vntr_name_to_vntr(vntr_names):
+def get_vntr_name_to_vntr(vntr_names, vntr_db):
     vntr_name_map = get_vntr_name_map()
     vntr_name_to_vntr = {}
-    vntr_db="/nucleus/projects/saraj/vntr/sources/COH_analysis/databases/combined_trf_hg38/hg38_VNTRs_by_TRF.db"
     vntrs = load_unique_vntrs_data(vntr_db)
     for vntr in vntrs:
         if str(vntr.id) in vntr_name_map:
@@ -382,7 +335,6 @@ def multi_box_plot(alleles_df, haplotypes, output_postfix,
                    ncols=3,
                    sharey=True,
                    gridspec_kw={'width_ratios': [2.5, 2.5, 1]})
-    #print("data frame shape before plotting box plot", alleles_df.shape)
 
     # Remove axis lines in the middle
     ax[1].spines["left"].set_visible(False)
@@ -411,7 +363,6 @@ def multi_box_plot(alleles_df, haplotypes, output_postfix,
     ax[2].tick_params(axis="x", rotation=rotation, labelsize=font_size)
     # Save figure
     plt.savefig(filename + ".pdf", bbox_inches="tight", format="pdf")
-    #plt.savefig(filename + ".jpg", bbox_inches="tight", format="jpg")
 
 def box_plot(alleles_df, plot_swarm, output_postfix,
              palette="RdBu", title=None,
@@ -424,13 +375,6 @@ def box_plot(alleles_df, plot_swarm, output_postfix,
         plot = sns.swarmplot(data=alleles_df.transpose(),
                          color="grey",
                          size=2)
-    if False:
-        if "all" in output_postfix:
-            # For all disease VNTRs, we want lighter color towards the end of the spectrum.
-            palette = "rocket"
-        else:
-            # For all disease VNTRs, we want lighter color at the beginning of the spectrum.
-            palette = "rocket_r"
     if violins:
         plot = sns.violinplot(data=alleles_df.transpose(),
                        palette=palette,
@@ -438,16 +382,6 @@ def box_plot(alleles_df, plot_swarm, output_postfix,
     else:
         plot = sns.boxplot(data=alleles_df.transpose(),
                    palette=palette)
-                   # "crest" is a light green to dark blue palette
-                      #width=3,
-                      #scale="width",
-                      #cut=0)
-    if False and "genic" in output_postfix:
-        #print("Box plot ticks ", plt.xticks())
-        # INS VNTR id is 123860
-        xtick_index = list(alleles_df.index).index(123860)
-        plt.text(s="INS", x=xtick_index, y=0)
-        plot.set(xticks=[], xticklabels=[])
     if output_postfix.startswith("all"):
         font_size = 10
         rotation = 90
@@ -457,7 +391,6 @@ def box_plot(alleles_df, plot_swarm, output_postfix,
              title=title)
 
     plot.figure.savefig(filename + ".pdf", bbox_inches="tight", format="pdf")
-    #plot.figure.savefig(filename + ".jpg", bbox_inches="tight", format="jpg")
 
 def histogram(x, xlabel, ylabel, num_bins, filename, cumulative=False, xlim=None):
     # Apply xlim as upperbound
@@ -474,10 +407,6 @@ def histogram(x, xlabel, ylabel, num_bins, filename, cumulative=False, xlim=None
     xticklabels = [str(xtick) for xtick in xticks]
     xticklabels[-1] = ">={}".format(xticklabels[-1])
     ax = plt.gca()
-    #ax.set(
-    #       xticks=xticks,
-    #       xticklabels=xticklabels,
-    #       )
     ax.set_xticks(xticks)
     ax.set_xticklabels(xticklabels, rotation=45)
     ax.set_xlabel(xlabel)
@@ -538,10 +467,8 @@ def scatterplot(raw_dataframe, x, y, xlabel, ylabel, filename,
         alpha = 0.8
         linewidth=0.5
     if xlim is not None:
-        #plt.xlim(0, xlim)
         dataframe[x] = raw_dataframe[x].clip(0, xlim)
     if ylim is not None:
-        #plt.ylim(0, ylim)
         dataframe[y] = raw_dataframe[y].clip(0, ylim)
     if is_histplot:
         # Create figure base and adjust ratios
@@ -692,7 +619,6 @@ def scatterplot(raw_dataframe, x, y, xlabel, ylabel, filename,
                 text_x = min(row[x], max_x) - 5 * (delta_x)
                 text_y = row[y] + (2 * delta_y)
             # Only write the text for spaced points
-            #if text_x * text_y > mult_value_for_text:
             if "disease" in filename:
                 # Don't print for genic VNTRs, too many items to print
                 plot.text(s=row[hue], x=text_x, y=text_y, size=5)
@@ -775,31 +701,6 @@ def group_vntrs_cv(alleles_df, vntrs):
     print("max CV {} min CV {}".format(max(cv_vals), min(cv_vals)))
     return low_cv, high_cv
 
-def test_abnormal_peak(alleles_df):
-    from collections import Counter
-    df_motif_len_20 = alleles_df[alleles_df["motif_len"] == 20]
-    print("for motif length 20, len ", len(df_motif_len_20))
-    #print(df_motif_len_20)
-    df_motif_len_82_84 = alleles_df[(alleles_df["motif_len"] >= 82) & (alleles_df["motif_len"] <= 84)]
-    print("for motif length 82-84, len ", len(df_motif_len_82_84))
-    #print(df_motif_len_82_84)
-    df_motif_len_82 = alleles_df[(alleles_df["motif_len"] == 82)]
-    print(df_motif_len_82_84["start_coordinate"])
-    print("for motif length 82, len ", len(df_motif_len_82))
-    df_motif_len_83 = alleles_df[(alleles_df["motif_len"] == 83)]
-    print("for motif length 83, len ", len(df_motif_len_83))
-    df_motif_len_84 = alleles_df[(alleles_df["motif_len"] == 84)]
-    print("for motif length 84, len ", len(df_motif_len_84))
-    df_motif_len_85 = alleles_df[(alleles_df["motif_len"] == 85)]
-    print("for motif length 85, len ", len(df_motif_len_85))
-    coordinates = list(df_motif_len_84["start_coordinate"])
-    chrs = [coordinate.split(":")[0] for coordinate in coordinates]
-    print(Counter(chrs))
-    coordinates_in_chr19 = [int(coordinate.split(":")[1]) for coordinate in coordinates\
-                            if coordinate.startswith("chr19")]
-    print("quantiles for chr19 coordinates: [0, 0.25, 0.50, 0.75, 1]",
-           np.quantile(coordinates_in_chr19, [0, 0.25, 0.50, 0.75, 1]))
-    #print([coordinate for coordinate in coordinates if coordinate.startswith("chr19")])
 
 def plot_genotypes(genotypes_df, alleles_df, vntrs, haplotypes,
                     filename_prefix, title_prefix,
@@ -821,7 +722,6 @@ def plot_genotypes(genotypes_df, alleles_df, vntrs, haplotypes,
                     output_postfix=filename_prefix+"_all_sorted_polymorphism")
         # Plot figues based on low, medium or high median of the distribution
         if plot_median_based_plots:
-            #low_median, medium_median, high_median = group_vntrs_median_repeat_count(alleles_df, vntrs)
             low_median = alleles_df[alleles_df["median_rc"] < 10]
             medium_median = alleles_df[(alleles_df["median_rc"] >= 10 & alleles_df["median_rc"] < 20)]
             high_median = alleles_df[alleles_df["median_rc"] >= 20]
@@ -839,7 +739,6 @@ def plot_genotypes(genotypes_df, alleles_df, vntrs, haplotypes,
                         output_postfix=filename_prefix+"_high_median_sorted")
 
     # Plot figure based on high variance in the VNTR genotype distribution
-    #low_var, high_var = group_vntrs_variance(alleles_df[haplotypes], vntrs)
     if "disease" in filename_prefix:
         var_threshold = 10
         var_rc_lim = 300
@@ -848,10 +747,8 @@ def plot_genotypes(genotypes_df, alleles_df, vntrs, haplotypes,
         var_rc_lim = 1000
     high_var = alleles_df[alleles_df["var_rc"] >= var_threshold]
     low_var = alleles_df[alleles_df["var_rc"] < var_threshold]
-    print("len of alleles_df {} len of low var {} len of high var {}".format(
-            len(alleles_df), len(low_var), len(high_var)))
-    #print("num low var {} num high var {}".format(len(low_var), len(high_var)))
-    #print("high var {}".format(high_var[vntr_id_column].to_string()))
+    #print("len of alleles_df {} len of low var {} len of high var {}".format(
+    #        len(alleles_df), len(low_var), len(high_var)))
     palette="RdBu"
     if "disease" in filename_prefix:
         box_plot(high_var[haplotypes],
@@ -866,68 +763,34 @@ def plot_genotypes(genotypes_df, alleles_df, vntrs, haplotypes,
                 font_size=5,
                 rotation=90,
                 output_postfix=filename_prefix+"_low_var_sorted")
-    #low_cv, high_cv = group_vntrs_cv(alleles_df[haplotypes], vntrs)
     if "disease" in filename_prefix:
         cv_threshold = 0.3
     else: # genic VNTRs
         cv_threshold = 0.6
     high_cv = alleles_df[alleles_df["cov_rc"] >= cv_threshold]
     low_cv = alleles_df[alleles_df["cov_rc"] < cv_threshold]
-    #print("num low cv {} num high cv {}".format(
-    #        len(low_cv), len(high_cv), list(high_cv[vntr_id_column])))
     box_plot(high_cv[haplotypes],
                 plot_swarm=plot_swarm,
                 title=title_prefix+" with High CoV in Repeats",
                 output_postfix=filename_prefix+"_high_cov_sorted")
 
-    ### Histograms
-    if False:
-        print("Plotting histograms")
-        histogram(alleles_df["median_rc"],
-              xlabel="Repeat counts",
-              ylabel="Percentage",
-              xlim=100,
-              num_bins=20,
-              filename=filename_prefix+"_median_rc_hist.pdf")
-
-        histogram(alleles_df["median_rc"],
-              xlabel="Repeat counts",
-              ylabel="Reverse cumulative percentage",
-              xlim=100,
-              cumulative=-1,
-              num_bins=20,
-              filename=filename_prefix+"_median_rc_hist.pdf")
-
-        histogram(alleles_df["motif_len"],
-              xlabel="VNTR motif length",
-              ylabel="Percentage",
-              num_bins=50,
-              filename=filename_prefix+"_motif_len_hist.pdf")
-
-        histogram(alleles_df["motif_len"],
-              xlabel="VNTR motif length",
-              ylabel="Reverse cumulative percentage",
-              num_bins=50,
-              cumulative=-1,
-              filename=filename_prefix+"_motif_len_hist.pdf")
 
 
     ### Scatter plots
     print("Plotting scatterplots")
 
-    ## X = motif_len
-    if False:
+    if "genic" in filename_prefix:
         scatterplot(alleles_df,
-                x="motif_len",
-                y="median_rc",
-                xlabel="VNTR motif length (bp)",
-                ylabel="VNTR repeat count",
-                filename=filename_prefix+"_motif_len_rc_w_median.pdf",
-                add_median=True,
-                hue=None,
-                legend=True,
-                ylim=100,
-                )
+                    x="median_rc",
+                    y="var_rc",
+                    xlim=500,
+                    xlabel="Repeat counts",
+                    ylabel="variance in repeat counts in samples",
+                    hue=vntr_id_column,
+                    add_quantiles=True,
+                    filename=filename_prefix+"_median_rc_var_rc_w_quantiles.pdf",
+                    )
+
     scatterplot(alleles_df,
                 x="motif_len",
                 y="median_rc",
@@ -940,147 +803,59 @@ def plot_genotypes(genotypes_df, alleles_df, vntrs, haplotypes,
                 legend=True,
                 ylim=100,
                 )
-    if False:
-        scatterplot(alleles_df,
-                x="motif_len",
-                y="cov_rc",
-                xlabel="VNTR motif length (bp)",
-                ylabel="Coefficient of variance in repeat counts in samples",
-                filename=filename_prefix+"_motif_len_cov_w_quantile.pdf",
-                add_quantiles=True,
-                hue="gc_content",
-                )
-        scatterplot(alleles_df,
-                x="motif_len",
-                y="var_rc",
-                ylim=200,
-                xlabel="VNTR motif length (bp)",
-                ylabel="Variance in repeat counts in samples",
-                filename=filename_prefix+"_motif_len_var_w_quantile.pdf",
-                add_quantiles=True,
-                hue="gc_content",
-                )
-        ## X is a metric of variation
-        scatterplot(alleles_df,
-                x="cov_rc",
-                y="gc_content",
-                xlabel="Coefficient of variance in repeat counts in samples",
-                ylabel="GC content",
-                hue=vntr_id_column,
-                filename=filename_prefix+"_cov_rc_gc_content.pdf",
-                )
 
-        scatterplot(alleles_df,
-                x="var_rc",
-                y="gc_content",
-                xlabel="Variance of repeat counts in samples",
-                ylabel="GC content",
-                xlim=var_rc_lim,
-                hue=vntr_id_column,
-                filename=filename_prefix+"_var_rc_gc_content.pdf",
-                )
+def parse_arguments():
+    parser = argparse.ArgumentParser(
+                prog="vntr_genotypes_plot",
+                description="Plot the vntr genotypes.")
 
-        ## X = median_rc
-        # Y is a metric of variation
-        scatterplot(alleles_df,
-                x="median_rc",
-                y="cov_rc",
-                xlabel="Repeat counts",
-                ylabel="Coefficient of variance in repeat counts in samples",
-                hue=vntr_id_column,
-                filename=filename_prefix+"_median_rc_cov_rc.pdf",
-                )
+    parser.add_argument("--vntr-db", help="Path to the db file for vntrs.",
+                        type=str,
+                        default="../../target_vntrs/p_vntrs_g_vntrs.db")
+    parser.add_argument("--g-vntrs-short-db", help="Path to the db file for short g-vntrs.",
+                        type=str,
+                        default="../../target_vntrs/illumina_probed_short_vntrs.db")
+    parser.add_argument("--g-vntrs-long-db", help="Path to the db file for long g-vntrs.",
+                        type=str,
+                        default="../../target_vntrs/pacbio_probed_long_vntrs.db")
+    parser.add_argument("--p-vntrs-ids", help="Path to the text file including all p-vntr ids.",
+                        type=str,
+                        default="../../target_vntrs/disease_associated_all_vntrs_v5_unique.txt")
+    parser.add_argument("--g-vntrs-log-dir", help="Path to the directory including g_vntrs genotypes.",
+                        type=str, required=True)
+    parser.add_argument("--p-vntrs-log-dir", help="Path to the directory including p_vntrs genotypes.",
+                        type=str, required=True)
+    parser.add_argument("--ids-to-discard-file", help="Path to the text file including ids to be discarded (e.g. test strs).",
+                        type=str,
+                        default="../../target_vntrs/str_ids_to_discard.txt")
+    parser.add_argument("--gc-flanking-threshold", help="Threshold for how many nucleotides" + \
+                            " into each of the flanking regions is considered for GC content.",
+                        type=int,
+                        default=100)
+    args = parser.parse_args()
+    return args
 
-        scatterplot(alleles_df,
-                x="median_rc",
-                y="cov_rc",
-                xlabel="Repeat counts",
-                ylabel="Coefficient of variance in repeat counts in samples",
-                hue="motif_len",
-                add_quantiles=True,
-                xlim=150,
-                filename=filename_prefix+"_median_rc_cov_rc_hue_motif_len_w_quantile_xlim_150.pdf",
-                )
+def main():
 
-        scatterplot(alleles_df,
-                x="median_rc",
-                y="var_rc",
-                ylim=var_rc_lim,
-                xlabel="Repeat counts",
-                ylabel="variance in repeat counts in samples",
-                hue=vntr_id_column,
-                #add_noise_line=True,
-                filename=filename_prefix+"_median_rc_var_rc.pdf",
-                )
-    if "genic" in filename_prefix:
-        scatterplot(alleles_df,
-                    x="median_rc",
-                    y="var_rc",
-                    xlim=500,
-                    xlabel="Repeat counts",
-                    ylabel="variance in repeat counts in samples",
-                    hue=vntr_id_column,
-                    add_quantiles=True,
-                    #add_noise_line=True,
-                    filename=filename_prefix+"_median_rc_var_rc_w_quantiles.pdf",
-                    )
-    if False:
-        ## X = median_rc
-        # Y is GC content
-        scatterplot(alleles_df,
-                x="median_rc",
-                y="gc_content",
-                xlabel="Repeat counts",
-                ylabel="GC content",
-                hue=vntr_id_column,
-                filename=filename_prefix+"_median_rc_gc_content.pdf",
-                )
+    args = parse_arguments()
 
-        scatterplot(alleles_df,
-                x="median_rc",
-                y="gc_content",
-                xlabel="Repeat counts",
-                ylabel="GC content",
-                hue=vntr_id_column,
-                add_quantiles=True,
-                filename=filename_prefix+"_median_rc_gc_content_w_quantiles.pdf",
-                )
-
-        scatterplot(alleles_df,
-                x="median_rc",
-                y="gc_content",
-                xlabel="Repeat counts",
-                ylabel="GC content",
-                hue=vntr_id_column,
-                xlim=150,
-                add_quantiles=True,
-                filename=filename_prefix+"_median_rc_gc_content_w_quantiles_xlim_150.pdf",
-                )
-
-        scatterplot(alleles_df,
-                x="median_est_len",
-                y="gc_content",
-                xlabel="Median allele in VNTR length",
-                ylabel="GC content",
-                hue=vntr_id_column,
-                filename=filename_prefix+"_median_est_len_gc_content.pdf",
-                )
-
-
-if __name__ == "__main__":
     # Set flags on which figures to plot on this run
     plot_swarm = False
     plot_median_based_plots = False
     plot_disease_vntrs = True
-    plot_genic_vntrs = False
+    plot_genic_vntrs = True
 
     plt.rcParams.update({'font.size': 10})
     if plot_disease_vntrs:
         # Graphs for disease associated VNTRs
         print("Working with phenotype associated VNTRs")
-        genotypes_df, alleles_df, vntrs, haplotypes = get_disease_genotype_distributions()
+        genotypes_df, alleles_df, vntrs, haplotypes = get_disease_genotype_distributions(
+                        p_vntrs_ids_file=args.p_vntrs_ids,
+                        vntr_db=args.vntr_db,
+                        p_vntrs_log_dir=args.p_vntrs_log_dir,
+                        flanking_threshold=args.gc_flanking_threshold)
         plot_genotypes(genotypes_df, alleles_df, vntrs, haplotypes,
-                        filename_prefix="figures/disease_vntr",
+                        filename_prefix="disease_vntr",
                         title_prefix="Disease associated VNTRs",
                         vntr_id_column="vntr_gene_name",
                         plot_median_based_plots=plot_median_based_plots,
@@ -1088,7 +863,13 @@ if __name__ == "__main__":
     if plot_genic_vntrs:
         # Graphs for Genic VNTRs
         print("Working with gene proximal VNTRs")
-        genotypes_df, alleles_df, vntrs, haplotypes, samples = get_genic_genotype_distributions(verbose=False)
+        genotypes_df, alleles_df, vntrs, haplotypes, samples = get_genic_genotype_distributions(
+                    long_vntr_db=args.g_vntrs_long_db,
+                    short_vntr_db=args.g_vntrs_short_db,
+                    g_vntrs_log_dir=args.g_vntrs_log_dir,
+                    strs_filename=args.ids_to_discard_file,
+                    flanking_threshold=args.gc_flanking_threshold,
+                    verbose=False)
         vntrs_genotyped = alleles_df.dropna(subset=["median_rc"])
         print("len alleles df {} len vntrs genotyped {}".format(
             len(alleles_df), len(vntrs_genotyped)))
@@ -1098,13 +879,14 @@ if __name__ == "__main__":
             len(alleles_df[alleles_df["median_rc"] <= 20]),
             len(alleles_df[alleles_df["median_rc"] <= 10]),
             ))
-        print(alleles_df["median_rc"].describe())
-        if False:
-            test_abnormal_peak(alleles_df)
+        #print(alleles_df["median_rc"].describe())
 
         plot_genotypes(genotypes_df, alleles_df, vntrs, haplotypes,
-                        filename_prefix="figures/genic_vntr",
+                        filename_prefix="genic_vntr",
                         title_prefix="Gene proximal VNTRs",
                         vntr_id_column="vntr_id",
                         plot_median_based_plots=plot_median_based_plots,
                         plot_swarm=plot_swarm)
+
+if __name__ == "__main__":
+    main()

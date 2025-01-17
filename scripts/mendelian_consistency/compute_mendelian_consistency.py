@@ -1,6 +1,7 @@
 import pandas as pd
 from cyvcf2 import VCF
 import numpy as np
+import argparse
 import itertools
 from collections import defaultdict
 from matplotlib import pyplot as plt
@@ -171,7 +172,9 @@ def is_non_polymorphic(sample_genotype, mother_genotype, father_genotype):
            int(father_genotype[0]) == 0 and \
            int(father_genotype[1]) == 0
 
-def compute_mc(vcf_filename, pedigree_filename, load_motif_complexity_scores=True, verbose=False):
+def compute_mc(vcf_filename, pedigree_filename,
+               strs_filename,
+               load_motif_complexity_scores=True, verbose=False):
     # Getting pedigree information
     pedigree = pd.read_csv(pedigree_filename, delim_whitespace=True)
     trios = pedigree[(pedigree['FatherID'] != "0") & (pedigree['MotherID'] != "0")]
@@ -195,7 +198,7 @@ def compute_mc(vcf_filename, pedigree_filename, load_motif_complexity_scores=Tru
             motif_complexity_score_map = pickle.load(motif_complexity_score_file)
 
     str_ids = []
-    with open("../vntrs_to_discard/str_ids.txt", "r") as str_ids_file:
+    with open(strs_filename, "r") as str_ids_file:
         lines = str_ids_file.readlines()
         str_ids = [int(line) for line in lines]
 
@@ -304,17 +307,35 @@ def compute_mc(vcf_filename, pedigree_filename, load_motif_complexity_scores=Tru
         pickle.dump(motif_complexity_score_map, motif_complexity_file)
     with open("data/vid_to_complexity_score_genic.bin", "wb") as vid_to_complexity_file:
         pickle.dump(vid_to_complexity_score, vid_to_complexity_file)
-    # plot histogram for MCs
-    #histogram(mc_summary_per_row, suffix="")
-    #low_mc_variants = [mc for mc in mc_summary_per_row if mc < 90]
-    #histogram(low_mc_variants, suffix="low_mc_lt_90")
+
+def parse_arguments():
+    parser = argparse.ArgumentParser(
+                prog="compute_mendelian_consistency",
+                description="Compute the Mendelian consistency of trios.")
+
+    parser.add_argument("--ids-to-discard-file", help="Path to the text file including ids to be discarded (e.g. test strs).",
+                        type=str,
+                        default="../../target_vntrs/str_ids_to_discard.txt")
+    parser.add_argument("--merged-vcf", help="Path to the vcf file including the VNTR genotypes " + \
+                            "for all the samples in all trios under study. " + \
+                            "A merged vcf file is provided in the data directory.",
+                        type=str,
+                        default="data/merged_trio_hprc.vcf")
+    parser.add_argument("--pedigree", help="Path to the pedigree txt file. " + \
+                            "Pedigree files provided for both HPRC and GIAB in "
+                            "vcf file including the VNTR genotypes " + \
+                            "for all the samples in all trios under study.",
+                        type=str,
+                        default="data/pedigree_hprc.txt")
+    args = parser.parse_args()
+    return args
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("Usage: python {} <path to merged vcf file>".format(sys.argv[0]))
-        exit(1)
-    vcf_filename = sys.argv[1]
-    #pedigree_filename = "pedigree_giab.txt"
-    pedigree_filename = "pedigree_hprc.txt"
 
-    compute_mc(vcf_filename, pedigree_filename, verbose=False)
+    args = parse_arguments()
+    vcf_filename = args.merged_vcf
+    pedigree_filename = args.pedigree
+
+    compute_mc(vcf_filename, pedigree_filename,
+                strs_filename=args.ids_to_discard_file,
+                verbose=False)
